@@ -403,7 +403,6 @@ private fun DashboardContent(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClassesContent(
     isCompact: Boolean,
@@ -467,7 +466,6 @@ private fun ClassesContent(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudentsContent(
     isCompact: Boolean,
