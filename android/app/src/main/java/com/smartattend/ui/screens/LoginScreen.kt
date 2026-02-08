@@ -25,7 +25,6 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -53,14 +53,16 @@ import com.smartattend.ui.theme.SmartAttendMutedForeground
 import com.smartattend.ui.theme.SmartAttendPrimary
 import com.smartattend.ui.theme.SmartAttendPrimaryForeground
 import com.smartattend.ui.theme.SmartAttendPrimaryGradientEnd
+import com.smartattend.ui.viewmodel.AuthViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
     onNavigateBack: () -> Unit,
     onNavigateToApp: () -> Unit,
 ) {
-    val isLogin = remember { mutableStateOf(false) }
+    val viewModel: AuthViewModel = viewModel()
+    val uiState = viewModel.uiState.collectAsState()
     val fullName = remember { mutableStateOf("") }
     val email = remember { mutableStateOf("") }
     val password = remember { mutableStateOf("") }
@@ -85,7 +87,7 @@ fun LoginScreen(
                     Icon(imageVector = Icons.Outlined.ArrowBack, contentDescription = "Back")
                 }
                 Text(
-                    text = if (isLogin.value) "Sign In" else "Create Account",
+                    text = if (uiState.value.isLogin) "Sign In" else "Create Account",
                     style = MaterialTheme.typography.titleLarge,
                 )
             }
@@ -132,11 +134,11 @@ fun LoginScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Text(
-                        text = if (isLogin.value) "Welcome back" else "Create your account",
+                        text = if (uiState.value.isLogin) "Welcome back" else "Create your account",
                         style = MaterialTheme.typography.titleLarge,
                     )
 
-                    if (!isLogin.value) {
+                    if (!uiState.value.isLogin) {
                         LabeledField(
                             label = "Full Name",
                             value = fullName.value,
@@ -187,20 +189,36 @@ fun LoginScreen(
                     }
 
                     Button(
-                        onClick = onNavigateToApp,
+                        onClick = {
+                            viewModel.submit(
+                                fullName = fullName.value,
+                                email = email.value,
+                                password = password.value,
+                                onSuccess = onNavigateToApp,
+                            )
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
+                        enabled = !uiState.value.isLoading,
                     ) {
-                        Text(text = if (isLogin.value) "Sign In" else "Create Account")
+                        Text(text = if (uiState.value.isLogin) "Sign In" else "Create Account")
+                    }
+
+                    uiState.value.errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
 
                     TextButton(
-                        onClick = { isLogin.value = !isLogin.value },
+                        onClick = { viewModel.toggleMode() },
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                     ) {
                         Text(
-                            text = if (isLogin.value) {
+                            text = if (uiState.value.isLogin) {
                                 "Don't have an account? Sign up"
                             } else {
                                 "Already have an account? Sign in"
@@ -255,7 +273,6 @@ fun LoginScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LabeledField(
     label: String,
