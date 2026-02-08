@@ -1,0 +1,28 @@
+# Android
+*.apk
+*.aar
+*.ap_
+*.dex
+bin/
+gen/
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+*.jks
+*.log
+
+# Java/Spring Boot
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+.gradle/
+build/
+bin/
+.settings/
+.project
+.classpath
