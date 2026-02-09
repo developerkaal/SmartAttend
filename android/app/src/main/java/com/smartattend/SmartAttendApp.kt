@@ -23,7 +23,13 @@ fun SmartAttendApp() {
             )
         }
         composable("app") {
-            AppShell()
+            AppShell(
+                onLogout = {
+                    navController.navigate("login") {
+                        popUpTo("app") { inclusive = true }
+                    }
+                },
+            )
         }
     }
 }

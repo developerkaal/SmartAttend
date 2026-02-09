@@ -8,52 +8,70 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-//import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TrendingUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.smartattend.data.AttendanceItem
+import com.smartattend.data.ClassResponse
+import com.smartattend.data.StudentRequest
 import com.smartattend.ui.theme.SmartAttendAccent
 import com.smartattend.ui.theme.SmartAttendBorder
 import com.smartattend.ui.theme.SmartAttendDestructive
@@ -63,6 +81,9 @@ import com.smartattend.ui.theme.SmartAttendPrimaryForeground
 import com.smartattend.ui.theme.SmartAttendPrimaryGradientEnd
 import com.smartattend.ui.theme.SmartAttendSuccess
 import com.smartattend.ui.theme.SmartAttendWarning
+import com.smartattend.ui.viewmodel.SmartAttendViewModel
+import com.smartattend.ui.viewmodel.UiEvent
+import java.time.LocalDate
 
 private enum class AppSection(val label: String) {
     Dashboard("Dashboard"),
@@ -72,36 +93,207 @@ private enum class AppSection(val label: String) {
     Reports("Reports"),
 }
 
-@Composable
-fun AppShell() {
-    val selected = remember { mutableStateOf(AppSection.Dashboard) }
+private data class StatItem(
+    val title: String,
+    val value: String,
+    val icon: ImageVector,
+    val color: Color,
+)
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        Sidebar(selected = selected.value, onSelect = { selected.value = it })
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            when (selected.value) {
-                AppSection.Dashboard -> DashboardContent()
-                AppSection.Classes -> ClassesContent()
-                AppSection.Students -> StudentsContent()
-                AppSection.Attendance -> AttendanceContent()
-                AppSection.Reports -> ReportsContent()
+@Composable
+fun AppShell(onLogout: () -> Unit) {
+    val viewModel: SmartAttendViewModel = viewModel()
+    val uiState = viewModel.uiState.collectAsState()
+    val selected = remember { mutableStateOf(AppSection.Dashboard) }
+    val isCompact = LocalConfiguration.current.screenWidthDp < 600
+    val snackbarHostState = remember { SnackbarHostState() }
+    val messageBanner = remember { mutableStateOf<MessageBannerState?>(null) }
+    val context = LocalContext.current
+    val showProfileDialog = remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshAll()
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            val message = when (event) {
+                is UiEvent.Success -> event.message
+                is UiEvent.Error -> event.message
+                is UiEvent.Offline -> event.message
+            }
+            val type = when (event) {
+                is UiEvent.Success -> BannerType.Success
+                is UiEvent.Error -> BannerType.Error
+                is UiEvent.Offline -> BannerType.Warning
+            }
+            messageBanner.value = MessageBannerState(message, type)
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            if (isCompact) {
+                TopAppBar(
+                    title = { Text(text = selected.value.label) },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                    windowInsets = WindowInsets.statusBars,
+                    actions = {
+                        TextButton(onClick = { showProfileDialog.value = true }) {
+                            Text(text = "Profile")
+                        }
+                    },
+                )
+            }
+        },
+        bottomBar = {
+            if (isCompact) {
+                NavigationBar {
+                    AppSection.values().forEach { section ->
+                        NavigationBarItem(
+                            selected = selected.value == section,
+                            onClick = { selected.value = section },
+                            icon = {
+                                Icon(
+                                    imageVector = section.icon(),
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(text = section.label) },
+                        )
+                    }
+                }
+            }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { padding ->
+        if (isCompact) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                messageBanner.value?.let { banner ->
+                    MessageBanner(banner = banner, onDismiss = { messageBanner.value = null })
+                }
+                uiState.value.errorMessage?.let { message ->
+                    ErrorBanner(message = message)
+                }
+                AppSectionContent(
+                    selected = selected.value,
+                    isCompact = true,
+                    viewModel = viewModel,
+                    uiState = uiState.value,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                Sidebar(
+                    selected = selected.value,
+                    onSelect = { selected.value = it },
+                    userName = uiState.value.userName,
+                    userEmail = uiState.value.userEmail,
+                    onProfileClick = { showProfileDialog.value = true },
+                    onLogout = {
+                        com.smartattend.data.SessionManager.clear(context)
+                        onLogout()
+                    },
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    messageBanner.value?.let { banner ->
+                        MessageBanner(banner = banner, onDismiss = { messageBanner.value = null })
+                    }
+                    uiState.value.errorMessage?.let { message ->
+                        ErrorBanner(message = message)
+                    }
+                    AppSectionContent(
+                        selected = selected.value,
+                        isCompact = false,
+                        viewModel = viewModel,
+                        uiState = uiState.value,
+                    )
+                }
             }
         }
+        if (uiState.value.isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x33000000)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+    }
+
+    if (showProfileDialog.value) {
+        ProfileDialog(
+            name = uiState.value.userName.orEmpty(),
+            email = uiState.value.userEmail.orEmpty(),
+            onDismiss = { showProfileDialog.value = false },
+            onSave = { name, email ->
+                viewModel.updateProfile(context, name, email)
+                messageBanner.value = MessageBannerState("Profile updated.", BannerType.Success)
+                showProfileDialog.value = false
+            },
+            onLogout = {
+                com.smartattend.data.SessionManager.clear(context)
+                showProfileDialog.value = false
+                onLogout()
+            },
+        )
     }
 }
 
 @Composable
-private fun Sidebar(selected: AppSection, onSelect: (AppSection) -> Unit) {
+private fun AppSectionContent(
+    selected: AppSection,
+    isCompact: Boolean,
+    viewModel: SmartAttendViewModel,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+) {
+    when (selected) {
+        AppSection.Dashboard -> DashboardContent(isCompact, uiState)
+        AppSection.Classes -> ClassesContent(isCompact, uiState, viewModel)
+        AppSection.Students -> StudentsContent(isCompact, uiState, viewModel)
+        AppSection.Attendance -> AttendanceContent(isCompact, uiState, viewModel)
+        AppSection.Reports -> ReportsContent(isCompact, uiState, viewModel)
+    }
+}
+
+private fun AppSection.icon(): ImageVector = when (this) {
+    AppSection.Dashboard -> Icons.Outlined.Home
+    AppSection.Classes -> Icons.Outlined.School
+    AppSection.Students -> Icons.Outlined.Group
+    AppSection.Attendance -> Icons.Outlined.CheckCircle
+    AppSection.Reports -> Icons.Outlined.BarChart
+}
+
+@Composable
+private fun Sidebar(
+    selected: AppSection,
+    onSelect: (AppSection) -> Unit,
+    userName: String?,
+    userEmail: String?,
+    onProfileClick: () -> Unit,
+    onLogout: () -> Unit,
+) {
     val navItems = listOf(
         AppSection.Dashboard to Icons.Outlined.Home,
         AppSection.Classes to Icons.Outlined.School,
@@ -175,81 +367,117 @@ private fun Sidebar(selected: AppSection, onSelect: (AppSection) -> Unit) {
                         .border(1.dp, SmartAttendBorder, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(text = "DG", fontWeight = FontWeight.Bold, color = SmartAttendPrimary)
+                    Text(
+                        text = userName?.take(2)?.uppercase() ?: "SA",
+                        fontWeight = FontWeight.Bold,
+                        color = SmartAttendPrimary,
+                    )
                 }
                 Column {
-                    Text(text = "Diamond Ghimire", fontWeight = FontWeight.Medium)
-                    Text(text = "diamondassist21@gmail.com", fontSize = 12.sp, color = SmartAttendMutedForeground)
+                    Text(text = userName ?: "SmartAttend User", fontWeight = FontWeight.Medium)
+                    Text(
+                        text = userEmail ?: "signin@smartattend.app",
+                        fontSize = 12.sp,
+                        color = SmartAttendMutedForeground,
+                    )
                 }
             }
-            TextButton(onClick = { }) {
-                Text(text = "Sign Out", color = SmartAttendMutedForeground)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onProfileClick) {
+                    Text(text = "Edit Profile")
+                }
+                TextButton(onClick = onLogout) {
+                    Text(text = "Sign Out", color = SmartAttendMutedForeground)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DashboardContent() {
+private fun DashboardContent(
+    isCompact: Boolean,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+) {
+    val dashboard = uiState.dashboard
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Column {
-            Text(text = "Welcome back, Diamond!", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                text = "Welcome back${uiState.userName?.let { ", $it" } ?: ""}!",
+                style = MaterialTheme.typography.headlineMedium,
+            )
             Text(
                 text = "Here's an overview of your attendance management system.",
                 color = SmartAttendMutedForeground,
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
-            StatTile("Total Students", "4", Icons.Outlined.Group, SmartAttendPrimary)
-            StatTile("Total Classes", "2", Icons.Outlined.School, SmartAttendSuccess)
-            StatTile("Today's Attendance", "0%", Icons.Outlined.CheckCircle, SmartAttendDestructive)
-            StatTile("Overall Attendance", "100%", Icons.Outlined.TrendingUp, SmartAttendSuccess)
+        if (dashboard == null) {
+            LoadingCard()
+            return
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Card(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(text = "Class Attendance Overview", fontWeight = FontWeight.SemiBold)
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = SmartAttendAccent.copy(alpha = 0.3f)),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column {
-                                Text(text = "Tuition", fontWeight = FontWeight.Medium)
-                                Text(text = "3/3 present", fontSize = 12.sp, color = SmartAttendMutedForeground)
-                            }
-                            StatusPill(text = "100%", color = SmartAttendSuccess)
-                        }
+        val stats = listOf(
+            StatItem("Total Students", dashboard.totalStudents.toString(), Icons.Outlined.Group, SmartAttendPrimary),
+            StatItem("Total Classes", dashboard.totalClasses.toString(), Icons.Outlined.School, SmartAttendSuccess),
+            StatItem("Today's Attendance", "${dashboard.todayAttendance}%", Icons.Outlined.CheckCircle, SmartAttendWarning),
+            StatItem("Overall Attendance", "${dashboard.overallAttendance}%", Icons.Outlined.TrendingUp, SmartAttendSuccess),
+        )
+
+        if (isCompact) {
+            stats.chunked(2).forEach { rowStats ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    rowStats.forEach { stat ->
+                        StatTile(
+                            title = stat.title,
+                            value = stat.value,
+                            icon = stat.icon,
+                            accent = stat.color,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
+                stats.forEach { stat ->
+                    StatTile(stat.title, stat.value, stat.icon, stat.color, Modifier.weight(1f))
+                }
+            }
+        }
 
-            Card(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(text = "Quick Actions", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        QuickActionCard("Mark Attendance", Icons.Outlined.CheckCircle, SmartAttendPrimary, Modifier.weight(1f))
-                        QuickActionCard("Add Student", Icons.Outlined.Group, SmartAttendSuccess, Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        QuickActionCard("Add Class", Icons.Outlined.School, SmartAttendWarning, Modifier.weight(1f))
-                        QuickActionCard("View Reports", Icons.Outlined.TrendingUp, SmartAttendAccent, Modifier.weight(1f))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text = "Class Attendance Overview", fontWeight = FontWeight.SemiBold)
+                if (dashboard.classSummaries.isEmpty()) {
+                    Text(text = "No attendance records yet.", color = SmartAttendMutedForeground)
+                } else {
+                    dashboard.classSummaries.forEach { summary ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SmartAttendAccent.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text(text = summary.className, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        text = "${summary.present}/${summary.total} present",
+                                        fontSize = 12.sp,
+                                        color = SmartAttendMutedForeground,
+                                    )
+                                }
+                                StatusPill(text = "${summary.percentage}%", color = SmartAttendSuccess)
+                            }
+                        }
                     }
                 }
             }
@@ -257,9 +485,16 @@ private fun DashboardContent() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ClassesContent() {
+private fun ClassesContent(
+    isCompact: Boolean,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+    viewModel: SmartAttendViewModel,
+) {
+    val showAddDialog = remember { mutableStateOf(false) }
+    val showEditDialog = remember { mutableStateOf(false) }
+    val showDeleteDialog = remember { mutableStateOf(false) }
+    val editClass = remember { mutableStateOf<ClassResponse?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -270,44 +505,116 @@ private fun ClassesContent() {
                 Text(text = "Classes", style = MaterialTheme.typography.titleLarge)
                 Text(text = "Manage your classes and sections", color = SmartAttendMutedForeground)
             }
-            Button(onClick = { }) {
-                Icon(imageVector = Icons.Outlined.Add, contentDescription = null)
+            Button(onClick = { showAddDialog.value = true }) {
+                Icon(imageVector = Icons.Outlined.School, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(text = "Add Class")
             }
         }
 
-        OutlinedTextField(
-            value = "",
-            onValueChange = { },
-            placeholder = { Text("Search classes...") },
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null) },
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                focusedBorderColor = SmartAttendPrimary,
-                focusedLabelColor = SmartAttendPrimary,
-            ),
-        )
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
-        ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TableHeader(listOf("Class Name", "Description", "Students", "Created"))
-                ClassRow("maths", "—", "0", "Feb 5, 2026")
-                ClassRow("Tuition", "—", "4", "Feb 5, 2026")
+        if (uiState.classes.isEmpty()) {
+            EmptyStateCard("No classes yet", "Create your first class to get started.")
+        } else if (isCompact) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                uiState.classes.forEach { classItem ->
+                    ClassCard(
+                        classItem = classItem,
+                        onEdit = {
+                            editClass.value = it
+                            showEditDialog.value = true
+                        },
+                        onDelete = {
+                            editClass.value = it
+                            showDeleteDialog.value = true
+                        },
+                    )
+                }
+            }
+        } else {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TableHeader(listOf("Class Name", "Description", "Students", "Created"))
+                    uiState.classes.forEach { classItem ->
+                        ClassRow(
+                            name = classItem.name,
+                            description = classItem.description ?: "—",
+                            students = classItem.studentCount.toString(),
+                            created = classItem.createdAt.take(10),
+                            onEdit = {
+                                editClass.value = classItem
+                                showEditDialog.value = true
+                            },
+                            onDelete = {
+                                editClass.value = classItem
+                                showDeleteDialog.value = true
+                            },
+                        )
+                    }
+                }
             }
         }
     }
+
+    if (showAddDialog.value) {
+        AddClassDialog(
+            onDismiss = { showAddDialog.value = false },
+            onSubmit = { name, description ->
+                viewModel.createClass(name, description) { showAddDialog.value = false }
+            },
+        )
+    }
+
+    if (showEditDialog.value && editClass.value != null) {
+        AddClassDialog(
+            title = "Edit Class",
+            initialName = editClass.value?.name.orEmpty(),
+            initialDescription = editClass.value?.description,
+            onDismiss = { showEditDialog.value = false },
+            onSubmit = { name, description ->
+                val cls = editClass.value ?: return@AddClassDialog
+                viewModel.updateClass(cls.id, name, description) { showEditDialog.value = false }
+            },
+        )
+    }
+
+    if (showDeleteDialog.value && editClass.value != null) {
+        ConfirmDialog(
+            title = "Delete class?",
+            message = "This will remove the class and its records.",
+            onDismiss = { showDeleteDialog.value = false },
+            onConfirm = {
+                val cls = editClass.value ?: return@ConfirmDialog
+                viewModel.deleteClass(cls.id) { showDeleteDialog.value = false }
+            },
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StudentsContent() {
+private fun StudentsContent(
+    isCompact: Boolean,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+    viewModel: SmartAttendViewModel,
+) {
     val showAddDialog = remember { mutableStateOf(false) }
-    val showUploadDialog = remember { mutableStateOf(false) }
+    val showEditDialog = remember { mutableStateOf(false) }
+    val showDeleteDialog = remember { mutableStateOf(false) }
+    val editStudent = remember { mutableStateOf<com.smartattend.data.StudentResponse?>(null) }
+    val selectedClass = remember { mutableStateOf<ClassResponse?>(null) }
+
+    LaunchedEffect(uiState.classes) {
+        if (selectedClass.value == null && uiState.classes.isNotEmpty()) {
+            selectedClass.value = uiState.classes.first()
+        }
+    }
+
+    LaunchedEffect(selectedClass.value?.id) {
+        viewModel.loadStudents(selectedClass.value?.id)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
@@ -320,11 +627,6 @@ private fun StudentsContent() {
                 Text(text = "Manage student records", color = SmartAttendMutedForeground)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { showUploadDialog.value = true }) {
-                    Icon(imageVector = Icons.Outlined.Edit, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Bulk Upload")
-                }
                 Button(onClick = { showAddDialog.value = true }) {
                     Icon(imageVector = Icons.Outlined.Person, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -333,130 +635,262 @@ private fun StudentsContent() {
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "Filter by class:", color = SmartAttendMutedForeground)
-            Spacer(modifier = Modifier.width(12.dp))
-            DropdownField(label = "All Classes")
-        }
-
-        OutlinedTextField(
-            value = "",
-            onValueChange = { },
-            placeholder = { Text("Search students...") },
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null) },
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                focusedBorderColor = SmartAttendPrimary,
-                focusedLabelColor = SmartAttendPrimary,
-            ),
+        ClassDropdown(
+            label = "Filter by class",
+            classes = uiState.classes,
+            selectedClass = selectedClass.value,
+            onSelected = { selectedClass.value = it },
         )
 
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
-        ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TableHeader(listOf("Roll No", "Name", "Class", "Email", "Phone"))
-                StudentRow("001", "Sachin Kharel", "Tuition", "—", "—")
-                StudentRow("004", "Random User", "Tuition", "—", "—")
-                StudentRow("014", "Rijan Pokhrel", "Tuition", "rijan@gmail.com", "+97771417099")
+        if (uiState.students.isEmpty()) {
+            EmptyStateCard("No students yet", "Add students to start tracking attendance.")
+        } else if (isCompact) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                uiState.students.forEach { student ->
+                    StudentCard(
+                        name = student.fullName,
+                        rollNo = student.rollNo,
+                        className = student.className,
+                        email = student.email,
+                        phone = student.phone,
+                        onEdit = {
+                            editStudent.value = student
+                            showEditDialog.value = true
+                        },
+                        onDelete = {
+                            editStudent.value = student
+                            showDeleteDialog.value = true
+                        },
+                    )
+                }
             }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.End)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
-                .border(1.dp, SmartAttendBorder, RoundedCornerShape(12.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            Column {
-                Text(text = "Success", fontWeight = FontWeight.SemiBold)
-                Text(text = "Student deleted successfully", color = SmartAttendMutedForeground, fontSize = 12.sp)
+        } else {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TableHeader(listOf("Roll No", "Name", "Class", "Email", "Phone"))
+                    uiState.students.forEach { student ->
+                        StudentRow(
+                            roll = student.rollNo,
+                            name = student.fullName,
+                            className = student.className,
+                            email = student.email ?: "—",
+                            phone = student.phone ?: "—",
+                            onEdit = {
+                                editStudent.value = student
+                                showEditDialog.value = true
+                            },
+                            onDelete = {
+                                editStudent.value = student
+                                showDeleteDialog.value = true
+                            },
+                        )
+                    }
+                }
             }
         }
     }
 
     if (showAddDialog.value) {
-        StudentDialog(title = "Add New Student", onDismiss = { showAddDialog.value = false })
+        AddStudentDialog(
+            classes = uiState.classes,
+            onDismiss = { showAddDialog.value = false },
+            onSubmit = { request ->
+                viewModel.createStudent(request) { showAddDialog.value = false }
+            },
+        )
     }
 
-    if (showUploadDialog.value) {
-        BulkUploadDialog(onDismiss = { showUploadDialog.value = false })
+    if (showEditDialog.value && editStudent.value != null) {
+        AddStudentDialog(
+            title = "Edit Student",
+            classes = uiState.classes,
+            initialStudent = editStudent.value,
+            onDismiss = { showEditDialog.value = false },
+            onSubmit = { request ->
+                val student = editStudent.value ?: return@AddStudentDialog
+                viewModel.updateStudent(student.id, request) { showEditDialog.value = false }
+            },
+        )
+    }
+
+    if (showDeleteDialog.value && editStudent.value != null) {
+        ConfirmDialog(
+            title = "Delete student?",
+            message = "This will remove the student record.",
+            onDismiss = { showDeleteDialog.value = false },
+            onConfirm = {
+                val student = editStudent.value ?: return@ConfirmDialog
+                viewModel.deleteStudent(student.id, selectedClass.value?.id) { showDeleteDialog.value = false }
+            },
+        )
     }
 }
 
 @Composable
-private fun AttendanceContent() {
+private fun AttendanceContent(
+    isCompact: Boolean,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+    viewModel: SmartAttendViewModel,
+) {
+    val selectedClass = remember { mutableStateOf<ClassResponse?>(null) }
+    val selectedDate = remember { mutableStateOf(LocalDate.now().toString()) }
+    val attendanceMap = remember { mutableStateMapOf<Long, Boolean>() }
+
+    LaunchedEffect(uiState.classes) {
+        if (selectedClass.value == null && uiState.classes.isNotEmpty()) {
+            selectedClass.value = uiState.classes.first()
+        }
+    }
+
+    LaunchedEffect(selectedClass.value?.id, selectedDate.value) {
+        selectedClass.value?.id?.let { classId ->
+            viewModel.loadStudents(classId)
+            viewModel.loadAttendance(classId, selectedDate.value)
+        }
+    }
+
+    LaunchedEffect(uiState.students, uiState.attendance) {
+        attendanceMap.clear()
+        val attendanceByStudent = uiState.attendance.associateBy { it.studentId }
+        uiState.students.forEach { student ->
+            attendanceMap[student.id] = attendanceByStudent[student.id]?.present ?: false
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Column {
             Text(text = "Mark Attendance", style = MaterialTheme.typography.titleLarge)
             Text(text = "Select a class and date to mark attendance", color = SmartAttendMutedForeground)
         }
 
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        ClassDropdown(
+            label = "Class",
+            classes = uiState.classes,
+            selectedClass = selectedClass.value,
+            onSelected = { selectedClass.value = it },
+        )
+
+        OutlinedTextField(
+            value = selectedDate.value,
+            onValueChange = { selectedDate.value = it },
+            label = { Text("Date (YYYY-MM-DD)") },
+            leadingIcon = { Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (uiState.students.isEmpty()) {
+            EmptyStateCard("No students yet", "Add students to start marking attendance.")
+        } else {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column {
-                        Text(text = "Class", fontWeight = FontWeight.Medium)
-                        DropdownField(label = "maths")
-                    }
-                    Column {
-                        Text(text = "Date", fontWeight = FontWeight.Medium)
-                        DropdownField(label = "February 7th, 2026")
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { }) {
-                        Text(text = "Mark All Present")
-                    }
-                    OutlinedButton(onClick = { }) {
-                        Text(text = "Mark All Absent")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    uiState.students.forEach { student ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text(text = student.fullName, fontWeight = FontWeight.Medium)
+                                Text(text = student.rollNo, color = SmartAttendMutedForeground, fontSize = 12.sp)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { attendanceMap[student.id] = true },
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = if (attendanceMap[student.id] == true) SmartAttendPrimary else SmartAttendMutedForeground,
+                                    ),
+                                ) {
+                                    Text("Present")
+                                }
+                                OutlinedButton(
+                                    onClick = { attendanceMap[student.id] = false },
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = if (attendanceMap[student.id] == false) SmartAttendDestructive else SmartAttendMutedForeground,
+                                    ),
+                                ) {
+                                    Text("Absent")
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+        Button(
+            onClick = {
+                val classId = selectedClass.value?.id ?: return@Button
+                val records = attendanceMap.map { AttendanceItem(it.key, it.value) }
+                viewModel.saveAttendance(classId, selectedDate.value, records) {}
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = selectedClass.value != null && uiState.students.isNotEmpty(),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(text = "No students in this class yet.", color = SmartAttendMutedForeground)
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { }) {
-                    Text(text = "Add Students")
-                }
-            }
+            Text(text = "Save Attendance")
         }
     }
 }
 
 @Composable
-private fun ReportsContent() {
+private fun ReportsContent(
+    isCompact: Boolean,
+    uiState: com.smartattend.ui.viewmodel.SmartAttendUiState,
+    viewModel: SmartAttendViewModel,
+) {
+    val selectedClass = remember { mutableStateOf<ClassResponse?>(null) }
+    val selectedDate = remember { mutableStateOf(LocalDate.now().toString()) }
+
+    LaunchedEffect(uiState.classes) {
+        if (selectedClass.value == null && uiState.classes.isNotEmpty()) {
+            selectedClass.value = uiState.classes.first()
+        }
+    }
+
+    LaunchedEffect(selectedClass.value?.id) {
+        viewModel.loadStudentReports(selectedClass.value?.id)
+    }
+
+    LaunchedEffect(selectedClass.value?.id, selectedDate.value) {
+        selectedClass.value?.id?.let { classId ->
+            viewModel.loadDateReports(classId, selectedDate.value)
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(text = "Reports", style = MaterialTheme.typography.titleLarge)
         Text(
             text = "Generate and export attendance reports.",
             color = SmartAttendMutedForeground,
         )
+
+        ClassDropdown(
+            label = "Class",
+            classes = uiState.classes,
+            selectedClass = selectedClass.value,
+            onSelected = { selectedClass.value = it },
+        )
+
+        OutlinedTextField(
+            value = selectedDate.value,
+            onValueChange = { selectedDate.value = it },
+            label = { Text("Date (YYYY-MM-DD)") },
+            leadingIcon = { Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -465,17 +899,65 @@ private fun ReportsContent() {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(imageVector = Icons.Outlined.BarChart, contentDescription = null, tint = SmartAttendPrimary)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "Reports overview coming soon", fontWeight = FontWeight.Medium)
-                Text(
-                    text = "Export attendance by class, student, or date.",
-                    color = SmartAttendMutedForeground,
-                    textAlign = TextAlign.Center,
-                )
+                Text(text = "Student Attendance Summary", fontWeight = FontWeight.SemiBold)
+                if (uiState.studentReports.isEmpty()) {
+                    Text(text = "No reports available yet.", color = SmartAttendMutedForeground)
+                } else if (isCompact) {
+                    uiState.studentReports.forEach { report ->
+                        ReportCard(
+                            title = report.fullName,
+                            subtitle = report.className,
+                            value = "${report.percentage}%",
+                        )
+                    }
+                } else {
+                    uiState.studentReports.forEach { report ->
+                        ReportRow(
+                            label = report.fullName,
+                            subLabel = report.className,
+                            value = "${report.presentDays}/${report.totalDays}",
+                            percentage = report.percentage,
+                        )
+                    }
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(text = "Daily Attendance", fontWeight = FontWeight.SemiBold)
+                if (uiState.dateReports.isEmpty()) {
+                    Text(text = "No attendance logged for this date.", color = SmartAttendMutedForeground)
+                } else {
+                    uiState.dateReports.forEach { report ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text(text = report.fullName, fontWeight = FontWeight.Medium)
+                                Text(text = report.rollNo, color = SmartAttendMutedForeground, fontSize = 12.sp)
+                            }
+                            StatusPill(
+                                text = if (report.present) "Present" else "Absent",
+                                color = if (report.present) SmartAttendSuccess else SmartAttendDestructive,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -487,10 +969,10 @@ private fun StatTile(
     value: String,
     icon: ImageVector,
     accent: Color,
-    modifier: Modifier = Modifier   // 👈 add this
+    modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier,          // 👈 use it here
+        modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -514,28 +996,6 @@ private fun StatTile(
             ) {
                 Icon(imageVector = icon, contentDescription = null, tint = accent)
             }
-        }
-    }
-}
-
-
-@Composable
-private fun QuickActionCard(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.08f)),
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.2f)),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = accent)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = label, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
         }
     }
 }
@@ -568,7 +1028,14 @@ private fun TableHeader(columns: List<String>) {
 }
 
 @Composable
-private fun ClassRow(name: String, description: String, students: String, created: String) {
+private fun ClassRow(
+    name: String,
+    description: String,
+    students: String,
+    created: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -585,14 +1052,22 @@ private fun ClassRow(name: String, description: String, students: String, create
         }
         Text(text = created, modifier = Modifier.weight(1f), color = SmartAttendMutedForeground)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(imageVector = Icons.Outlined.Edit, contentDescription = null, tint = SmartAttendMutedForeground)
-            Icon(imageVector = Icons.Outlined.Delete, contentDescription = null, tint = SmartAttendDestructive)
+            TextButton(onClick = onEdit) { Text("Edit") }
+            TextButton(onClick = onDelete) { Text("Delete", color = SmartAttendDestructive) }
         }
     }
 }
 
 @Composable
-private fun StudentRow(roll: String, name: String, className: String, email: String, phone: String) {
+private fun StudentRow(
+    roll: String,
+    name: String,
+    className: String,
+    email: String,
+    phone: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -613,156 +1088,424 @@ private fun StudentRow(roll: String, name: String, className: String, email: Str
         Text(text = email, modifier = Modifier.weight(1f), color = SmartAttendMutedForeground)
         Text(text = phone, modifier = Modifier.weight(1f), color = SmartAttendMutedForeground)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(imageVector = Icons.Outlined.Edit, contentDescription = null, tint = SmartAttendMutedForeground)
-            Icon(imageVector = Icons.Outlined.Delete, contentDescription = null, tint = SmartAttendDestructive)
+            TextButton(onClick = onEdit) { Text("Edit") }
+            TextButton(onClick = onDelete) { Text("Delete", color = SmartAttendDestructive) }
         }
     }
 }
 
 @Composable
-private fun DropdownField(label: String) {
-    Box(
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
-            .border(1.dp, SmartAttendBorder, RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Text(text = label, fontSize = 12.sp)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StudentDialog(title: String, onDismiss: () -> Unit) {
+private fun ClassCard(
+    classItem: ClassResponse,
+    onEdit: (ClassResponse) -> Unit,
+    onDelete: (ClassResponse) -> Unit,
+) {
     Card(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0x99000000)),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.width(520.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = title, fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = onDismiss) { Text("×") }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LabeledInput("Roll No", "e.g. 001", Modifier.weight(1f))
-                        LabeledInput("Class", "maths", Modifier.weight(1f))
-                    }
-                    LabeledInput("Full Name", "Enter student name")
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LabeledInput("Email (Optional)", "student@email.com", Modifier.weight(1f))
-                        LabeledInput("Phone (Optional)", "+91 XXXXX XXXXX", Modifier.weight(1f))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        OutlinedButton(onClick = onDismiss) { Text("Cancel") }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Button(onClick = onDismiss) { Text("Add Student") }
-                    }
-                }
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = classItem.name, fontWeight = FontWeight.SemiBold)
+            Text(text = classItem.description ?: "No description", color = SmartAttendMutedForeground)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatusPill(text = "${classItem.studentCount} students", color = SmartAttendPrimary)
+                StatusPill(text = classItem.createdAt.take(10), color = SmartAttendAccent)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { onEdit(classItem) }) { Text("Edit") }
+                OutlinedButton(onClick = { onDelete(classItem) }) { Text("Delete") }
             }
         }
     }
 }
 
 @Composable
-private fun BulkUploadDialog(onDismiss: () -> Unit) {
+private fun StudentCard(
+    name: String,
+    rollNo: String,
+    className: String,
+    email: String?,
+    phone: String?,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Card(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0x99000000)),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.width(520.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = "Bulk Upload Students", fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = onDismiss) { Text("×") }
-                    }
-                    Text(
-                        text = "Paste CSV data with the following format:",
-                        color = SmartAttendMutedForeground,
-                        fontSize = 12.sp,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(SmartAttendAccent.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                    ) {
-                        Text(
-                            text = "roll_no,full_name,class_name,email,phone\n001,John Doe,Class 10A,john@email.com,+91 12345\n002,Jane Smith,Class 10A,,",
-                            fontSize = 12.sp,
-                        )
-                    }
-                    OutlinedTextField(
-                        value = "",
-                        onValueChange = { },
-                        placeholder = { Text("Paste CSV data here...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        OutlinedButton(onClick = onDismiss) { Text("Cancel") }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Button(
-                            onClick = onDismiss,
-                            colors = ButtonDefaults.buttonColors(containerColor = SmartAttendPrimary.copy(alpha = 0.5f)),
-                        ) {
-                            Text("Import")
-                        }
-                    }
-                }
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = name, fontWeight = FontWeight.SemiBold)
+            Text(text = "Roll No: $rollNo", color = SmartAttendMutedForeground, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusPill(text = className, color = SmartAttendPrimary)
+            }
+            if (!email.isNullOrBlank() || !phone.isNullOrBlank()) {
+                Text(text = email ?: phone.orEmpty(), color = SmartAttendMutedForeground, fontSize = 12.sp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onEdit) { Text("Edit") }
+                OutlinedButton(onClick = onDelete) { Text("Delete") }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class BannerType { Success, Error, Warning }
+
+private data class MessageBannerState(val message: String, val type: BannerType)
+
 @Composable
-private fun LabeledInput(label: String, placeholder: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = label, fontWeight = FontWeight.Medium)
-        OutlinedTextField(
-            value = "",
-            onValueChange = { },
-            placeholder = { Text(placeholder) },
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                focusedBorderColor = SmartAttendPrimary,
-                focusedLabelColor = SmartAttendPrimary,
-            ),
+private fun MessageBanner(banner: MessageBannerState, onDismiss: () -> Unit) {
+    val (background, content) = when (banner.type) {
+        BannerType.Success -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        BannerType.Error -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        BannerType.Warning -> SmartAttendWarning.copy(alpha = 0.2f) to SmartAttendWarning
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = background),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = banner.message, color = content, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss", color = content)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Confirm") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ProfileDialog(
+    name: String,
+    email: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onLogout: () -> Unit,
+) {
+    val nameState = remember { mutableStateOf(name) }
+    val emailState = remember { mutableStateOf(email) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Teacher Profile") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = nameState.value,
+                    onValueChange = { nameState.value = it },
+                    label = { Text("Full Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = emailState.value,
+                    onValueChange = { emailState.value = it },
+                    label = { Text("Email") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(nameState.value, emailState.value) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = onLogout) { Text("Logout") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReportCard(title: String, subtitle: String, value: String) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(text = title, fontWeight = FontWeight.SemiBold)
+                Text(text = subtitle, color = SmartAttendMutedForeground, fontSize = 12.sp)
+            }
+            StatusPill(text = value, color = SmartAttendSuccess)
+        }
+    }
+}
+
+@Composable
+private fun ReportRow(label: String, subLabel: String, value: String, percentage: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(text = label, fontWeight = FontWeight.Medium)
+            Text(text = subLabel, color = SmartAttendMutedForeground, fontSize = 12.sp)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(text = value, fontWeight = FontWeight.SemiBold)
+            Text(text = "$percentage%", color = SmartAttendMutedForeground, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun LoadingCard() {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = "Loading data...", color = SmartAttendMutedForeground)
+        }
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Text(
+            text = message,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(12.dp),
         )
     }
+}
+
+@Composable
+private fun EmptyStateCard(title: String, subtitle: String) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SmartAttendBorder),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(text = title, fontWeight = FontWeight.SemiBold)
+            Text(text = subtitle, color = SmartAttendMutedForeground, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun ClassDropdown(
+    label: String,
+    classes: List<ClassResponse>,
+    selectedClass: ClassResponse?,
+    onSelected: (ClassResponse) -> Unit,
+) {
+    val expanded = remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(text = label, fontWeight = FontWeight.Medium)
+        Box {
+            OutlinedTextField(
+                value = selectedClass?.name ?: "Select class",
+                onValueChange = {},
+                modifier = Modifier.fillMaxWidth(),
+                readOnly = true,
+                trailingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.School,
+                        contentDescription = null,
+                    )
+                },
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    focusedBorderColor = SmartAttendPrimary,
+                    focusedLabelColor = SmartAttendPrimary,
+                ),
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable { expanded.value = true },
+            )
+            DropdownMenu(
+                expanded = expanded.value,
+                onDismissRequest = { expanded.value = false },
+            ) {
+                classes.forEach { classItem ->
+                    DropdownMenuItem(
+                        text = { Text(classItem.name) },
+                        onClick = {
+                            expanded.value = false
+                            onSelected(classItem)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddClassDialog(
+    title: String = "Add New Class",
+    initialName: String = "",
+    initialDescription: String? = null,
+    onDismiss: () -> Unit,
+    onSubmit: (String, String?) -> Unit,
+) {
+    val name = remember { mutableStateOf(initialName) }
+    val description = remember { mutableStateOf(initialDescription ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name.value,
+                    onValueChange = { name.value = it },
+                    label = { Text("Class Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description.value,
+                    onValueChange = { description.value = it },
+                    label = { Text("Description (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSubmit(name.value, description.value.ifBlank { null }) },
+                enabled = name.value.isNotBlank(),
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun AddStudentDialog(
+    title: String = "Add New Student",
+    classes: List<ClassResponse>,
+    initialStudent: com.smartattend.data.StudentResponse? = null,
+    onDismiss: () -> Unit,
+    onSubmit: (StudentRequest) -> Unit,
+) {
+    val rollNo = remember { mutableStateOf(initialStudent?.rollNo.orEmpty()) }
+    val fullName = remember { mutableStateOf(initialStudent?.fullName.orEmpty()) }
+    val email = remember { mutableStateOf(initialStudent?.email.orEmpty()) }
+    val phone = remember { mutableStateOf(initialStudent?.phone.orEmpty()) }
+    val selectedClass = remember { mutableStateOf<ClassResponse?>(null) }
+
+    LaunchedEffect(classes) {
+        if (selectedClass.value == null && classes.isNotEmpty()) {
+            selectedClass.value = classes.firstOrNull { it.id == initialStudent?.classId } ?: classes.first()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = rollNo.value,
+                    onValueChange = { rollNo.value = it },
+                    label = { Text("Roll Number") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = fullName.value,
+                    onValueChange = { fullName.value = it },
+                    label = { Text("Full Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ClassDropdown(
+                    label = "Class",
+                    classes = classes,
+                    selectedClass = selectedClass.value,
+                    onSelected = { selectedClass.value = it },
+                )
+                OutlinedTextField(
+                    value = email.value,
+                    onValueChange = { email.value = it },
+                    label = { Text("Email (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = phone.value,
+                    onValueChange = { phone.value = it },
+                    label = { Text("Phone (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val classId = selectedClass.value?.id ?: return@Button
+                    onSubmit(
+                        StudentRequest(
+                            rollNo = rollNo.value,
+                            fullName = fullName.value,
+                            classId = classId,
+                            email = email.value.ifBlank { null },
+                            phone = phone.value.ifBlank { null },
+                        ),
+                    )
+                },
+                enabled = rollNo.value.isNotBlank() && fullName.value.isNotBlank() && selectedClass.value != null,
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
