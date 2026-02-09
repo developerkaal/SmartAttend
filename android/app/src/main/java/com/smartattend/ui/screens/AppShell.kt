@@ -38,10 +38,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -100,6 +102,7 @@ private data class StatItem(
     val color: Color,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppShell(onLogout: () -> Unit) {
     val viewModel: SmartAttendViewModel = viewModel()
@@ -1331,6 +1334,7 @@ private fun EmptyStateCard(title: String, subtitle: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClassDropdown(
     label: String,
