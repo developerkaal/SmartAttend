@@ -4,7 +4,8 @@
         android:allowBackup="true"
         android:label="SmartAttend"
         android:theme="@style/Theme.SmartAttend"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:name=".SmartAttendApplication">
         <activity
             android:name=".MainActivity"
             android:exported="true">

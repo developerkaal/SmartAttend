@@ -43,6 +43,8 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
@@ -78,6 +80,7 @@ import com.smartattend.ui.theme.SmartAttendPrimaryGradientEnd
 import com.smartattend.ui.theme.SmartAttendSuccess
 import com.smartattend.ui.theme.SmartAttendWarning
 import com.smartattend.ui.viewmodel.SmartAttendViewModel
+import com.smartattend.ui.viewmodel.UiEvent
 import java.time.LocalDate
 
 private enum class AppSection(val label: String) {
@@ -101,21 +104,35 @@ fun AppShell() {
     val uiState = viewModel.uiState.collectAsState()
     val selected = remember { mutableStateOf(AppSection.Dashboard) }
     val isCompact = LocalConfiguration.current.screenWidthDp < 600
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
         viewModel.refreshAll()
     }
 
-    if (isCompact) {
-        Scaffold(
-            topBar = {
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            val message = when (event) {
+                is UiEvent.Success -> event.message
+                is UiEvent.Error -> event.message
+                is UiEvent.Offline -> event.message
+            }
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            if (isCompact) {
                 TopAppBar(
                     title = { Text(text = selected.value.label) },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     windowInsets = WindowInsets.statusBars,
                 )
-            },
-            bottomBar = {
+            }
+        },
+        bottomBar = {
+            if (isCompact) {
                 NavigationBar {
                     AppSection.values().forEach { section ->
                         NavigationBarItem(
@@ -131,8 +148,11 @@ fun AppShell() {
                         )
                     }
                 }
-            },
-        ) { padding ->
+            }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { padding ->
+        if (isCompact) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -151,35 +171,36 @@ fun AppShell() {
                     uiState = uiState.value,
                 )
             }
-        }
-    } else {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
-        ) {
-            Sidebar(
-                selected = selected.value,
-                onSelect = { selected.value = it },
-                userName = uiState.value.userName,
-                userEmail = uiState.value.userEmail,
-            )
-            Column(
+        } else {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
             ) {
-                uiState.value.errorMessage?.let { message ->
-                    ErrorBanner(message = message)
-                }
-                AppSectionContent(
+                Sidebar(
                     selected = selected.value,
-                    isCompact = false,
-                    viewModel = viewModel,
-                    uiState = uiState.value,
+                    onSelect = { selected.value = it },
+                    userName = uiState.value.userName,
+                    userEmail = uiState.value.userEmail,
                 )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    uiState.value.errorMessage?.let { message ->
+                        ErrorBanner(message = message)
+                    }
+                    AppSectionContent(
+                        selected = selected.value,
+                        isCompact = false,
+                        viewModel = viewModel,
+                        uiState = uiState.value,
+                    )
+                }
             }
         }
     }

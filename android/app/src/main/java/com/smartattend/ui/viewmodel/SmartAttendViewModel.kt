@@ -9,10 +9,13 @@ import com.smartattend.data.ClassResponse
 import com.smartattend.data.DashboardResponse
 import com.smartattend.data.DateReport
 import com.smartattend.data.SessionManager
+import com.smartattend.data.ServiceLocator
 import com.smartattend.data.SmartAttendRepository
 import com.smartattend.data.StudentReport
 import com.smartattend.data.StudentRequest
 import com.smartattend.data.StudentResponse
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -32,7 +35,7 @@ data class SmartAttendUiState(
 )
 
 class SmartAttendViewModel(
-    private val repository: SmartAttendRepository = SmartAttendRepository(),
+    private val repository: SmartAttendRepository = ServiceLocator.repository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         SmartAttendUiState(
@@ -41,6 +44,8 @@ class SmartAttendViewModel(
         ),
     )
     val uiState: StateFlow<SmartAttendUiState> = _uiState
+    private val _events = MutableSharedFlow<UiEvent>()
+    val events: SharedFlow<UiEvent> = _events
 
     fun refreshAll() {
         loadDashboard()
@@ -56,7 +61,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchDashboard()
                 _uiState.update { it.copy(isLoading = false, dashboard = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load dashboard") }
+                val message = ex.localizedMessage ?: "Unable to load dashboard"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -68,7 +75,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchClasses()
                 _uiState.update { it.copy(isLoading = false, classes = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load classes") }
+                val message = ex.localizedMessage ?: "Unable to load classes"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -77,11 +86,18 @@ class SmartAttendViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                repository.createClass(name, description)
+                val response = repository.createClass(name, description)
                 loadClasses()
                 onSuccess()
+                if (response.createdAt == "offline") {
+                    _events.emit(UiEvent.Offline("Class saved offline and will sync later."))
+                } else {
+                    _events.emit(UiEvent.Success("Class created successfully."))
+                }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to create class") }
+                val message = ex.localizedMessage ?: "Unable to create class"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -93,7 +109,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchStudents(classId)
                 _uiState.update { it.copy(isLoading = false, students = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load students") }
+                val message = ex.localizedMessage ?: "Unable to load students"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -102,11 +120,18 @@ class SmartAttendViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                repository.createStudent(request)
+                val response = repository.createStudent(request)
                 loadStudents(request.classId)
                 onSuccess()
+                if (response.createdAt == "offline") {
+                    _events.emit(UiEvent.Offline("Student saved offline and will sync later."))
+                } else {
+                    _events.emit(UiEvent.Success("Student added successfully."))
+                }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to create student") }
+                val message = ex.localizedMessage ?: "Unable to create student"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -118,7 +143,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchAttendance(classId, date)
                 _uiState.update { it.copy(isLoading = false, attendance = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load attendance") }
+                val message = ex.localizedMessage ?: "Unable to load attendance"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -127,11 +154,18 @@ class SmartAttendViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                repository.saveAttendance(AttendanceRequest(classId, date, records))
+                val response = repository.saveAttendance(AttendanceRequest(classId, date, records))
                 loadAttendance(classId, date)
                 onSuccess()
+                if (response.firstOrNull()?.className == "Offline") {
+                    _events.emit(UiEvent.Offline("Attendance saved offline and will sync later."))
+                } else {
+                    _events.emit(UiEvent.Success("Attendance saved successfully."))
+                }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to save attendance") }
+                val message = ex.localizedMessage ?: "Unable to save attendance"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -143,7 +177,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchStudentReports(classId)
                 _uiState.update { it.copy(isLoading = false, studentReports = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load reports") }
+                val message = ex.localizedMessage ?: "Unable to load reports"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
@@ -155,7 +191,9 @@ class SmartAttendViewModel(
                 val response = repository.fetchDateReports(classId, date)
                 _uiState.update { it.copy(isLoading = false, dateReports = response) }
             } catch (ex: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = ex.localizedMessage ?: "Unable to load date reports") }
+                val message = ex.localizedMessage ?: "Unable to load date reports"
+                _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+                _events.emit(UiEvent.Error(message))
             }
         }
     }
